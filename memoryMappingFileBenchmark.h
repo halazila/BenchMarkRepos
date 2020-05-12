@@ -107,6 +107,17 @@ namespace memoryMappingFileBenchmark {
 				toVec.emplace_back(m_pData[i]);
 			}
 		}
+		int batchGet(const int nFromIdx, T* dest) {
+			Q_ASSERT(nFromIdx > -1 && nFromIdx < m_nSize);
+			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
+			int nNewIndexStart = nFromIdx / m_nGrow * m_nGrow;
+			if (nNewIndexStart != m_nIndexStart) {
+				remap(nNewIndexStart);
+			}
+			int count = min(m_nSize - nFromIdx, m_nGrow);
+			memcpy(dest, m_pData, count * m_nSizeType);
+			return count;
+		}
 		///save file
 		void write() {
 			char strNew[FILEHEAD_LENGTH] = { 0 };
@@ -189,22 +200,42 @@ namespace memoryMappingFileBenchmark {
 	};
 	QString file("data.txt");
 	VectorMMF<TestStruct> vectorMMF;
-	const int g_repeatCount = 100000;
+	const int g_repeatCount = 1000000;
 	int g_count = 0;
+	double g_double;
+	const int g_slround = 1000;
 
 	void singleReadFunc() {
 		TestStruct tstruct;
 		int nSize = vectorMMF.size();
 		for (int j = 0; j < nSize; j++) {
 			vectorMMF.singleGet(j, tstruct);
+			tstruct.mInt *= 2;
+			g_double = sqrt(tstruct.mInt);
 		}
 	}
 	void batchReadFunc() {
+		TestStruct* tsarr = new TestStruct[vectorMMF.m_nGrow];
+		int nSize = vectorMMF.size();
+		for (int i = 0; i < nSize; ) {
+			int n = vectorMMF.batchGet(i, tsarr);
+			i += n;
+			do {
+				tsarr[n - 1].mInt *= 2;
+				g_double = sqrt(tsarr[n - 1].mInt);
+			} while (--n);
+		}
+		delete[] tsarr;
+	}
+	void batchReadFunc2() {
 		std::vector<TestStruct> tsVec;
 		int nSize = vectorMMF.size();
 		for (int i = 0; i < nSize; ) {
 			vectorMMF.batchGet(i, tsVec);
 			i += tsVec.size();
+			for (int j = 0; j < tsVec.size(); j++) {
+				g_double = sqrt(tsVec[j].mInt);
+			}
 			tsVec.clear();
 		}
 	}
@@ -212,23 +243,26 @@ namespace memoryMappingFileBenchmark {
 		vectorMMF.push_back(TestStruct(g_count++));
 	}
 	void threadFuncSingleRead() {
-		static const int slround = 10;
-		for (int i = 0; i < g_repeatCount / slround; i++) {
+		for (int i = 0; i < g_repeatCount / g_slround; i++) {
 			singleReadFunc();
-			std::this_thread::sleep_for(std::chrono::microseconds(slround));
+			std::this_thread::sleep_for(std::chrono::microseconds(g_slround));
 		}
 	}
 	void threadFuncBatchRead() {
-		static const int slround = 10;
-		for (int i = 0; i < g_repeatCount / slround; i++) {
+		for (int i = 0; i < g_repeatCount / g_slround; i++) {
 			batchReadFunc();
-			std::this_thread::sleep_for(std::chrono::microseconds(slround));
+			std::this_thread::sleep_for(std::chrono::microseconds(g_slround));
+		}
+	}
+	void threadFuncBatchRead2() {
+		for (int i = 0; i < g_repeatCount / g_slround; i++) {
+			batchReadFunc2();
+			std::this_thread::sleep_for(std::chrono::microseconds(g_slround));
 		}
 	}
 	void threadFuncWrite() {
 		for (int i = 0; i < g_repeatCount; i++) {
 			writeFunc();
-			std::this_thread::sleep_for(std::chrono::microseconds(1));
 		}
 	}
 	void testRound() {
@@ -250,6 +284,7 @@ namespace memoryMappingFileBenchmark {
 		auto endSingleRead = std::chrono::high_resolution_clock::now();
 		std::cout << "single read:   " << std::chrono::duration_cast<std::chrono::milliseconds>(endSingleRead - startSingleRead).count() << " ms" << std::endl;
 		vectorMMF.write();
+		std::cout << g_double << " \n\r";
 		//////
 		threads.clear();
 		g_count = 0;
@@ -266,6 +301,25 @@ namespace memoryMappingFileBenchmark {
 		auto endBatchRead = std::chrono::high_resolution_clock::now();
 		std::cout << "batch read:    " << std::chrono::duration_cast<std::chrono::milliseconds>(endBatchRead - startBatchRead).count() << " ms" << std::endl;
 		vectorMMF.write();
+		std::cout << g_double << " \n\r";
+
+		//////
+		threads.clear();
+		g_count = 0;
+		vectorMMF.clear();
+		if (QFile::exists(file)) {
+			QFile::remove(file);
+		}
+		vectorMMF.read(file);
+		auto startBatchRead2 = std::chrono::high_resolution_clock::now();
+		threads.push_back(std::thread(threadFuncWrite));
+		threads.push_back(std::thread(threadFuncBatchRead2));
+		for (auto& thread : threads)
+			thread.join();
+		auto endBatchRead2 = std::chrono::high_resolution_clock::now();
+		std::cout << "batch read2:   " << std::chrono::duration_cast<std::chrono::milliseconds>(endBatchRead2 - startBatchRead2).count() << " ms" << std::endl;
+		vectorMMF.write();
+		std::cout << g_double << " \n\r";
 	}
 	int runBenchMark() {
 		testRound();
