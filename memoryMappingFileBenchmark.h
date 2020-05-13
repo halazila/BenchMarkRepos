@@ -77,19 +77,16 @@ namespace memoryMappingFileBenchmark {
 			DWORD nRead;
 			SetFilePointer(m_hFile, 0, NULL, FILE_BEGIN);
 
-			if (ReadFile(m_hFile, strOld, FILEHEAD_LENGTH, &nRead, NULL) && nRead == FILEHEAD_LENGTH)
-			{
+			if (ReadFile(m_hFile, strOld, FILEHEAD_LENGTH, &nRead, NULL) && nRead == FILEHEAD_LENGTH) {
 				char wc[20];
 				std::snprintf(wc, sizeof(wc), "V1.0.0_%4d", m_nSizeType);
 				std::string strKey(wc);
 
-				if (std::string(strOld) == strKey)
-				{
+				if (std::string(strOld) == strKey) {
 					m_nSize = *(int*)(strOld + 92);
 					m_nCapacity = *(int*)(strOld + 96);
 				}
-				else
-				{
+				else {
 					SetEndOfFile(m_hFile);//缩小文件
 				}
 			}
@@ -100,28 +97,23 @@ namespace memoryMappingFileBenchmark {
 
 		void write(bool bWrite = true)//写文件头
 		{
-			if (bWrite)
-			{
+			if (bWrite) {
 				if (m_mapEraseIndex.size())//重新整理未删掉的数据
 				{
 					bool b;
-					if (!(b = m_bMapAll))
-					{
+					if (!(b = m_bMapAll)) {
 						SetMapAll();
 					}
 
 					int nIndex = m_mapEraseIndex[0];
-					for (int i = nIndex; i < m_nSize; i++)
-					{
-						if (m_mapEraseIndex.find(i) == m_mapEraseIndex.end())
-						{
+					for (int i = nIndex; i < m_nSize; i++) {
+						if (m_mapEraseIndex.find(i) == m_mapEraseIndex.end()) {
 							memmove(m_pData + nIndex, m_pData + i, m_nSizeType);
 							nIndex++;
 						}
 					}
 
-					if (!b)
-					{
+					if (!b) {
 						SetMapAll(false);
 					}
 					m_nSize = nIndex;
@@ -136,8 +128,7 @@ namespace memoryMappingFileBenchmark {
 
 				DWORD nWrite;
 				SetFilePointer(m_hFile, 0, NULL, FILE_BEGIN);
-				if (!WriteFile(m_hFile, strNew, FILEHEAD_LENGTH, &nWrite, NULL) || nWrite != FILEHEAD_LENGTH)
-				{
+				if (!WriteFile(m_hFile, strNew, FILEHEAD_LENGTH, &nWrite, NULL) || nWrite != FILEHEAD_LENGTH) {
 					SetFilePointer(m_hFile, 0, NULL, FILE_BEGIN);
 					SetEndOfFile(m_hFile);
 				}
@@ -148,20 +139,16 @@ namespace memoryMappingFileBenchmark {
 		void push_back(const T& item)
 		{
 			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
-			if (m_nSize >= m_nCapacity)
-			{
+			if (m_nSize >= m_nCapacity) {
 				reserve(m_nCapacity * 2);
-				if (m_bMapAll)
-				{
+				if (m_bMapAll) {
 					remap(0);
 				}
 			}
 
-			if (!m_bMapAll)
-			{
+			if (!m_bMapAll) {
 				int nNewIndexStart = m_nSize / m_nGrow * m_nGrow;
-				if (nNewIndexStart != m_nIndexStart)
-				{
+				if (nNewIndexStart != m_nIndexStart) {
 					remap(nNewIndexStart);
 				}
 			}
@@ -172,13 +159,11 @@ namespace memoryMappingFileBenchmark {
 
 		void resize(int nSize)
 		{
-			if (nSize < 0)
-			{
+			if (nSize < 0) {
 				return;
 			}
 
-			if (nSize > m_nCapacity)
-			{
+			if (nSize > m_nCapacity) {
 				reserve(nSize % m_nCapacity ? (nSize / m_nCapacity + 1) * m_nCapacity : nSize);
 			}
 			m_nSize = nSize;
@@ -193,11 +178,9 @@ namespace memoryMappingFileBenchmark {
 				static T t = { 0 };
 				return t;
 			}
-			if (!m_bMapAll)
-			{
+			if (!m_bMapAll) {
 				int nNewIndexStart = nIndex / m_nGrow * m_nGrow;
-				if (nNewIndexStart != m_nIndexStart)
-				{
+				if (nNewIndexStart != m_nIndexStart) {
 					remap(nNewIndexStart);
 				}
 			}
@@ -220,29 +203,24 @@ namespace memoryMappingFileBenchmark {
 		}
 		bool operator== (CVectorMMF<T>& vc)
 		{
-			if (m_nSize != vc.size())
-			{
+			if (m_nSize != vc.size()) {
 				return false;
 			}
 
 			bool b1, b2;
-			if (!(b1 = m_bMapAll))
-			{
+			if (!(b1 = m_bMapAll)) {
 				SetMapAll();
 			}
-			if (!(b2 = vc.m_bMapAll))
-			{
+			if (!(b2 = vc.m_bMapAll)) {
 				vc.SetMapAll();
 			}
 
 			bool bResult = !memcmp(m_pData, vc.m_pData, m_nSize * m_nSizeType);
 
-			if (!b1)
-			{
+			if (!b1) {
 				SetMapAll(false);
 			}
-			if (!b2)
-			{
+			if (!b2) {
 				vc.SetMapAll(false);
 			}
 
@@ -257,13 +235,11 @@ namespace memoryMappingFileBenchmark {
 		{
 			m_nSize = vc.m_nSize;
 			m_mapEraseIndex = vc.m_mapEraseIndex;
-			if (m_pViewMap)
-			{
+			if (m_pViewMap) {
 				UnmapViewOfFile(m_pViewMap);
 				m_pViewMap = NULL;
 			}
-			if (m_hFileMap)
-			{
+			if (m_hFileMap) {
 				CloseHandle(m_hFileMap);
 				m_hFileMap = NULL;
 			}
@@ -276,21 +252,17 @@ namespace memoryMappingFileBenchmark {
 		}
 		void erase(int nIndex)//可能会造成进程地址空间不足，尽量不要使用
 		{
-			if (nIndex < 0 || nIndex >= m_nSize)
-			{
+			if (nIndex < 0 || nIndex >= m_nSize) {
 				return;
 			}
 
-			if (nIndex != m_nSize - 1)
-			{
+			if (nIndex != m_nSize - 1) {
 				bool b;
-				if (!(b = m_bMapAll))
-				{
+				if (!(b = m_bMapAll)) {
 					SetMapAll();
 				}
 				memmove(m_pData + nIndex, m_pData + nIndex + 1, m_nSizeType * (m_nSize - nIndex - 1));
-				if (!b)
-				{
+				if (!b) {
 					SetMapAll(false);
 				}
 			}
@@ -299,8 +271,7 @@ namespace memoryMappingFileBenchmark {
 
 		void erase_virtual(int nIndex)
 		{
-			if (nIndex < 0 || nIndex >= m_nSize)
-			{
+			if (nIndex < 0 || nIndex >= m_nSize) {
 				return;
 			}
 			m_mapEraseIndex[nIndex] = 0;
@@ -314,8 +285,7 @@ namespace memoryMappingFileBenchmark {
 			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
 			m_nSize = 0;
 			m_mapEraseIndex.clear();
-			if (bCloseHandle)
-			{
+			if (bCloseHandle) {
 				CloseHandles();
 			}
 		}
@@ -327,8 +297,7 @@ namespace memoryMappingFileBenchmark {
 		void remap(int IndexStart)
 		{
 			m_nIndexStart = IndexStart;
-			if (m_pViewMap)
-			{
+			if (m_pViewMap) {
 				UnmapViewOfFile(m_pViewMap);
 				m_pViewMap = NULL;
 			}
@@ -339,12 +308,10 @@ namespace memoryMappingFileBenchmark {
 
 			int nMod = nFileOffset % m_nAllocGran;
 
-			if (!m_bMapAll)
-			{
+			if (!m_bMapAll) {
 				m_pViewMap = MapViewOfFile(m_hFileMap, FILE_MAP_WRITE, dwFileOffsetHigh, dwFileOffsetLow - nMod, m_nGrow * m_nSizeType + nMod);
 			}
-			else
-			{
+			else {
 				m_pViewMap = MapViewOfFile(m_hFileMap, FILE_MAP_WRITE, 0, FILEHEAD_LENGTH - nMod, 0);
 			}
 
@@ -354,13 +321,11 @@ namespace memoryMappingFileBenchmark {
 		void reserve(int nMinSize)
 		{
 			m_nCapacity = nMinSize;
-			if (m_pViewMap)
-			{
+			if (m_pViewMap) {
 				UnmapViewOfFile(m_pViewMap);
 				m_pViewMap = NULL;
 			}
-			if (m_hFileMap)
-			{
+			if (m_hFileMap) {
 				CloseHandle(m_hFileMap);
 			}
 
@@ -378,20 +343,17 @@ namespace memoryMappingFileBenchmark {
 
 		void PushBuffer(T* buf, int nCount)//直接写入一个buf,也就是nCount个item
 		{
-			if (m_nSize + nCount > m_nCapacity)
-			{
+			if (m_nSize + nCount > m_nCapacity) {
 				reserve((m_nSize + nCount) / m_nGrow * m_nGrow + ((m_nSize + nCount) % m_nGrow ? m_nGrow : 0));
 			}
 
 			bool b;
-			if (!(b = m_bMapAll))
-			{
+			if (!(b = m_bMapAll)) {
 				SetMapAll();
 			}
 			memcpy(m_pData + m_nSize, buf, m_nSizeType * nCount);
 			m_nSize += nCount;
-			if (!b)
-			{
+			if (!b) {
 				SetMapAll(false);
 			}
 		}
@@ -400,8 +362,7 @@ namespace memoryMappingFileBenchmark {
 		{
 			if (m_bMapAll) //仅在全部映射情况下才如此做
 			{
-				if (m_nCapacity > (m_nSize / m_nGrow + 1) * m_nGrow)
-				{
+				if (m_nCapacity > (m_nSize / m_nGrow + 1) * m_nGrow) {
 					m_nCapacity = (m_nSize / m_nGrow + 1) * m_nGrow;
 					remap(0);
 				}
@@ -410,19 +371,16 @@ namespace memoryMappingFileBenchmark {
 
 		void CloseHandles(void)//关闭各句柄
 		{
-			if (m_pViewMap)
-			{
+			if (m_pViewMap) {
 				UnmapViewOfFile(m_pViewMap);
 				m_pViewMap = NULL;
 			}
-			if (m_hFileMap)
-			{
+			if (m_hFileMap) {
 				CloseHandle(m_hFileMap);
 				m_hFileMap = NULL;
 			}
 
-			if (m_hFile)
-			{
+			if (m_hFile) {
 				CloseHandle(m_hFile);
 				m_hFile = NULL;
 			}
@@ -447,6 +405,12 @@ namespace memoryMappingFileBenchmark {
 		int m_nCapacity;			//capacity
 		int m_nAllocGran;			//virtual memory page size
 		std::recursive_mutex m_mutex;
+
+		QFile m_fileReadOnly;
+		uchar* m_pMapReadOnly;
+		T* m_pDataReadOnly;
+		int m_nIndexStartReadOnly;
+
 	public:
 		VectorMMF(int nGrow = 5000) {
 			m_nSizeType = sizeof(T);
@@ -465,6 +429,10 @@ namespace memoryMappingFileBenchmark {
 			if (!m_file.open(QIODevice::ReadWrite)) {
 				return;
 			}
+			m_fileReadOnly.setFileName(file);
+			if (!m_fileReadOnly.open(QIODevice::ReadOnly)) {
+				return;
+			}
 			char strOld[FILEHEAD_LENGTH];
 			if (m_file.read(strOld, FILEHEAD_LENGTH) == FILEHEAD_LENGTH) {
 				QString strKey = QString("V1.0.0_%1").arg(m_nSizeType, 4, 10, QChar(' '));//check file head
@@ -478,6 +446,7 @@ namespace memoryMappingFileBenchmark {
 			}
 			reserve(m_nCapacity);
 			remap(0);
+			remapReadOnly(0);
 		};
 		void push_back(const T& item) {
 			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
@@ -522,6 +491,14 @@ namespace memoryMappingFileBenchmark {
 			}
 			dest = m_pData[nIndex - m_nIndexStart];
 		}
+		void singleGetReadOnly(const int nIndex, T& dest) {
+			Q_ASSERT(nIndex > -1 && nIndex < m_nSize);
+			int nNewIndexStart = nIndex / m_nGrow * m_nGrow;
+			if (nNewIndexStart != m_nIndexStartReadOnly) {
+				remapReadOnly(nNewIndexStart);
+			}
+			dest = m_pDataReadOnly[nIndex - m_nIndexStartReadOnly];
+		}
 		void batchGet(const int nFromIdx, std::vector<T>& toVec) {
 			Q_ASSERT(nFromIdx > -1 && nFromIdx < m_nSize);
 			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
@@ -548,6 +525,11 @@ namespace memoryMappingFileBenchmark {
 		}
 		///save file
 		void write() {
+			if (m_pMapReadOnly) {
+				m_fileReadOnly.unmap(m_pMapReadOnly);
+			}
+			m_fileReadOnly.close();
+
 			char strNew[FILEHEAD_LENGTH] = { 0 };
 			QString strKey = QString("V1.0.0_%1").arg(m_nSizeType, 4, 10, QChar(' '));
 			strcpy(strNew, strKey.toUtf8().constData());
@@ -566,17 +548,20 @@ namespace memoryMappingFileBenchmark {
 				m_file.unmap(m_pMap);
 			}
 			m_file.close();
+
 		}
 		void clear() {
 			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
 			m_nSize = 0;
 			m_file.close();
+			m_fileReadOnly.close();
 		}
 		int size() {
 			return m_nSize;
 		}
 		~VectorMMF() {
 			m_file.close();
+			m_fileReadOnly.close();
 		};
 
 	private:
@@ -594,6 +579,17 @@ namespace memoryMappingFileBenchmark {
 			m_pMap = m_file.map(nFileOffset - nMod, m_nGrow * m_nSizeType + nMod);
 			m_file.close();
 			m_pData = (T*)(m_pMap + nMod);
+		}
+		void remapReadOnly(int nIdxStart) {
+			m_nIndexStartReadOnly = nIdxStart;
+			qulonglong nFileOffset = ((qulonglong)nIdxStart) * m_nSizeType + FILEHEAD_LENGTH;
+			if (!m_fileReadOnly.isOpen() && !m_fileReadOnly.open(QIODevice::ReadOnly)) {
+				return;
+			}
+			int nMod = nFileOffset % m_nAllocGran;
+			m_fileReadOnly.unmap(m_pMapReadOnly);
+			m_pMapReadOnly = m_fileReadOnly.map(nFileOffset - nMod, m_nGrow * m_nSizeType + nMod);
+			m_pDataReadOnly = (T*)(m_pMapReadOnly + nMod);
 		}
 		void reserve(int nMinSize) {
 			m_nCapacity = nMinSize;
@@ -673,6 +669,15 @@ namespace memoryMappingFileBenchmark {
 			g_double = sqrt(tstruct.mInt);
 		}
 	}
+	void singleReadOnlyFunc() {
+		TestStruct tstruct;
+		int nSize = vectorMMF.size();
+		for (int j = 0; j < nSize; j++) {
+			vectorMMF.singleGetReadOnly(j, tstruct);
+			tstruct.mInt *= 2;
+			g_double = sqrt(tstruct.mInt);
+		}
+	}
 	void batchReadFunc() {
 		TestStruct* tsarr = new TestStruct[vectorMMF.m_nGrow];
 		int nSize = vectorMMF.size();
@@ -707,6 +712,12 @@ namespace memoryMappingFileBenchmark {
 			std::this_thread::sleep_for(std::chrono::microseconds(g_slround));
 		}
 	}
+	void threadFuncSingleReadOnly() {
+		for (int i = 0; i < g_repeatCount / g_slround; i++) {
+			singleReadOnlyFunc();
+			std::this_thread::sleep_for(std::chrono::microseconds(g_slround));
+		}
+	}
 	void threadFuncBatchRead() {
 		for (int i = 0; i < g_repeatCount / g_slround; i++) {
 			batchReadFunc();
@@ -738,7 +749,8 @@ namespace memoryMappingFileBenchmark {
 		vectorMMF.read(file);
 		auto startSingleRead = std::chrono::high_resolution_clock::now();
 		threads.push_back(std::thread(threadFuncWrite));
-		threads.push_back(std::thread(threadFuncSingleRead));
+		//threads.push_back(std::thread(threadFuncSingleRead));
+		threads.push_back(std::thread(threadFuncSingleReadOnly));
 		for (auto& thread : threads)
 			thread.join();
 		auto endSingleRead = std::chrono::high_resolution_clock::now();

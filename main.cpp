@@ -10,6 +10,6 @@ int main(int argc, char* argv[])
 
 	//mutexBenchMark::runBenchMark();
 	//containerBenchMark::runBenchMark();
-	memoryMappingFileBenchmark::runBenchMark();
+	memoryMappingFileBenchmark::runBenchMark(); 
 	return 0;
 }
