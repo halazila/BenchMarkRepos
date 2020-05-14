@@ -1,8 +1,12 @@
 #pragma once
 #include <QtCore>
 #include <mutex>
+#include "cleanSeprateReadWriteMMF.h"
 
+#ifndef FILEHEAD_LENGTH
 #define FILEHEAD_LENGTH 100 //file head length
+#endif // !FILEHEAD_LENGTH
+
 
 namespace memoryMappingFileBenchmark {
 	using namespace std;
@@ -56,7 +60,6 @@ namespace memoryMappingFileBenchmark {
 			CloseHandles();
 		}
 
-	public:
 		void Read(std::wstring strFile, bool bTradeDate = true)//读文件头,防止down后数据全部要重传，所以不采用多线程版的写"unwrite"
 		{
 			m_nSize = 0;
@@ -394,59 +397,59 @@ namespace memoryMappingFileBenchmark {
 	class VectorMMF
 	{
 	public:
+		///common attr
 		QString m_strFile;			//file name
-		QFile m_file;				//file object
-		uchar* m_pMap;				//memory-file map pointer
-		T* m_pData;					//current data pointer
-		int m_nIndexStart;			//current start index
 		int m_nSizeType;			//size of data type 
 		int m_nGrow;				//growth size value
 		int m_nSize;				//elements number
 		int m_nCapacity;			//capacity
-		int m_nAllocGran;			//virtual memory page size
+		///write handle
+		QFile m_fileWrite;			//file object
+		uchar* m_pMapWrite;			//memory-file map pointer
+		T* m_pDataWrite;			//current data pointer
+		int m_nIndexStartWrite;		//current start index
+		///read handle
+		QFile m_fileRead;
+		uchar* m_pMapRead;
+		T* m_pDataRead;
+		int m_nIndexStartRead;
+		///mutex
 		std::recursive_mutex m_mutex;
-
-		QFile m_fileReadOnly;
-		uchar* m_pMapReadOnly;
-		T* m_pDataReadOnly;
-		int m_nIndexStartReadOnly;
-
 	public:
 		VectorMMF(int nGrow = 5000) {
 			m_nSizeType = sizeof(T);
 			m_nGrow = nGrow;
-			m_nAllocGran = 65536;
 		}
 		void read(const QString& file) {
 			m_nSizeType = sizeof(T);
 			m_nSize = 0;
 			m_strFile = file;
 			m_nCapacity = m_nGrow;
-			m_pMap = nullptr;
-			m_nIndexStart = 0;
+			m_pMapWrite = nullptr;
+			m_nIndexStartWrite = 0;
 			//m_fileRw open
-			m_file.setFileName(file);
-			if (!m_file.open(QIODevice::ReadWrite)) {
+			m_fileWrite.setFileName(file);
+			if (!m_fileWrite.open(QIODevice::ReadWrite)) {
 				return;
 			}
-			m_fileReadOnly.setFileName(file);
-			if (!m_fileReadOnly.open(QIODevice::ReadOnly)) {
+			m_fileRead.setFileName(file);
+			if (!m_fileRead.open(QIODevice::ReadOnly)) {
 				return;
 			}
 			char strOld[FILEHEAD_LENGTH];
-			if (m_file.read(strOld, FILEHEAD_LENGTH) == FILEHEAD_LENGTH) {
+			if (m_fileWrite.read(strOld, FILEHEAD_LENGTH) == FILEHEAD_LENGTH) {
 				QString strKey = QString("V1.0.0_%1").arg(m_nSizeType, 4, 10, QChar(' '));//check file head
 				if (QString(strOld) == strKey) {
 					m_nSize = *(int*)(strOld + 94);
 					m_nCapacity = *(int*)(strOld + 96);
 				}
 				else {
-					m_file.resize(FILEHEAD_LENGTH);	//缩小文件	
+					m_fileWrite.resize(FILEHEAD_LENGTH);	//缩小文件	
 				}
 			}
 			reserve(m_nCapacity);
-			remap(0);
-			remapReadOnly(0);
+			remapWrite(0);
+			remapRead(0);
 		};
 		void push_back(const T& item) {
 			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
@@ -454,10 +457,10 @@ namespace memoryMappingFileBenchmark {
 				reserve(m_nCapacity * 2);
 			}
 			int nNewIndexStart = m_nSize / m_nGrow * m_nGrow;
-			if (nNewIndexStart != m_nIndexStart) {
-				remap(nNewIndexStart);
+			if (nNewIndexStart != m_nIndexStartWrite) {
+				remapWrite(nNewIndexStart);
 			}
-			m_pData[m_nSize - m_nIndexStart] = item;
+			m_pDataWrite[m_nSize - m_nIndexStartWrite] = item;
 			m_nSize++;
 		}
 
@@ -470,65 +473,67 @@ namespace memoryMappingFileBenchmark {
 				reserve(nSize % m_nCapacity ? (nSize / m_nCapacity + 1) * m_nCapacity : nSize);
 			}
 			m_nSize = nSize;
-			remap(0);
+			remapWrite(0);
 		}
 
 		T& operator[] (const int nIndex) {
 			Q_ASSERT(nIndex > -1 && nIndex < m_nSize);
 			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
 			int nNewIndexStart = nIndex / m_nGrow * m_nGrow;
-			if (nNewIndexStart != m_nIndexStart) {
-				remap(nNewIndexStart);
+			if (nNewIndexStart != m_nIndexStartWrite) {
+				remapWrite(nNewIndexStart);
 			}
-			return m_pData[nIndex - m_nIndexStart];
+			return m_pDataWrite[nIndex - m_nIndexStartWrite];
 		}
 		void singleGet(const int nIndex, T& dest) {
 			Q_ASSERT(nIndex > -1 && nIndex < m_nSize);
 			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
 			int nNewIndexStart = nIndex / m_nGrow * m_nGrow;
-			if (nNewIndexStart != m_nIndexStart) {
-				remap(nNewIndexStart);
+			if (nNewIndexStart != m_nIndexStartWrite) {
+				remapWrite(nNewIndexStart);
 			}
-			dest = m_pData[nIndex - m_nIndexStart];
+			dest = m_pDataWrite[nIndex - m_nIndexStartWrite];
 		}
 		void singleGetReadOnly(const int nIndex, T& dest) {
 			Q_ASSERT(nIndex > -1 && nIndex < m_nSize);
 			int nNewIndexStart = nIndex / m_nGrow * m_nGrow;
-			if (nNewIndexStart != m_nIndexStartReadOnly) {
-				remapReadOnly(nNewIndexStart);
+			if (nNewIndexStart != m_nIndexStartRead) {
+				remapRead(nNewIndexStart);
 			}
-			dest = m_pDataReadOnly[nIndex - m_nIndexStartReadOnly];
+			dest = m_pDataRead[nIndex - m_nIndexStartRead];
 		}
 		void batchGet(const int nFromIdx, std::vector<T>& toVec) {
 			Q_ASSERT(nFromIdx > -1 && nFromIdx < m_nSize);
 			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
 			int nNewIndexStart = nFromIdx / m_nGrow * m_nGrow;
-			if (nNewIndexStart != m_nIndexStart) {
-				remap(nNewIndexStart);
+			if (nNewIndexStart != m_nIndexStartWrite) {
+				remapWrite(nNewIndexStart);
 			}
 			int count = min(m_nSize - nFromIdx, m_nGrow);
 			toVec.reserve(count);
 			for (int i = 0; i < count; i++) {
-				toVec.emplace_back(m_pData[i]);
+				toVec.emplace_back(m_pDataWrite[i]);
 			}
 		}
 		int batchGet(const int nFromIdx, T* dest) {
 			Q_ASSERT(nFromIdx > -1 && nFromIdx < m_nSize);
 			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
 			int nNewIndexStart = nFromIdx / m_nGrow * m_nGrow;
-			if (nNewIndexStart != m_nIndexStart) {
-				remap(nNewIndexStart);
+			if (nNewIndexStart != m_nIndexStartWrite) {
+				remapWrite(nNewIndexStart);
 			}
 			int count = min(m_nSize - nFromIdx, m_nGrow);
-			memcpy(dest, m_pData, count * m_nSizeType);
+			memcpy(dest, m_pDataWrite, count * m_nSizeType);
 			return count;
 		}
 		///save file
 		void write() {
-			if (m_pMapReadOnly) {
-				m_fileReadOnly.unmap(m_pMapReadOnly);
+			if (m_pMapRead) {
+				m_fileRead.unmap(m_pMapRead);
+				m_pMapRead = nullptr;
+				m_pDataRead = nullptr;
 			}
-			m_fileReadOnly.close();
+			m_fileRead.close();
 
 			char strNew[FILEHEAD_LENGTH] = { 0 };
 			QString strKey = QString("V1.0.0_%1").arg(m_nSizeType, 4, 10, QChar(' '));
@@ -536,70 +541,83 @@ namespace memoryMappingFileBenchmark {
 			memcpy(strNew + 94, &m_nSize, 4);
 			memcpy(strNew + 96, &m_nCapacity, 4);
 
-			if (m_pMap) {
-				m_file.unmap(m_pMap);
+			if (m_pMapWrite) {
+				m_fileWrite.unmap(m_pMapWrite);
+				m_pMapWrite = nullptr;
 			}
 			///rewrite file head
-			if (!m_file.isOpen() && !m_file.open(QIODevice::ReadWrite)) {
-				return;
+			if (m_pMapWrite = m_fileWrite.map(0, FILEHEAD_LENGTH)) {
+				memcpy(m_pMapWrite, strNew, FILEHEAD_LENGTH);
+				m_fileWrite.unmap(m_pMapWrite);
+				m_pMapWrite = nullptr;
+				m_pDataWrite = nullptr;
 			}
-			if (m_pMap = m_file.map(0, FILEHEAD_LENGTH)) {
-				memcpy(m_pMap, strNew, FILEHEAD_LENGTH);
-				m_file.unmap(m_pMap);
-			}
-			m_file.close();
-
+			m_fileWrite.close();
 		}
 		void clear() {
 			std::lock_guard<decltype(m_mutex)> lock(m_mutex);
 			m_nSize = 0;
-			m_file.close();
-			m_fileReadOnly.close();
+			if (m_pMapWrite) {
+				m_fileWrite.unmap(m_pMapWrite);
+				m_pMapWrite = nullptr;
+				m_pDataWrite = nullptr;
+			}
+			m_fileWrite.close();
+			if (m_pMapRead) {
+				m_fileRead.unmap(m_pMapRead);
+				m_pMapRead = nullptr;
+				m_pDataRead = nullptr;
+			}
+			m_fileRead.close();
 		}
 		int size() {
 			return m_nSize;
 		}
 		~VectorMMF() {
-			m_file.close();
-			m_fileReadOnly.close();
+			if (m_pMapWrite) {
+				m_fileWrite.unmap(m_pMapWrite);
+				m_pMapWrite = nullptr;
+				m_pDataWrite = nullptr;
+			}
+			m_fileWrite.close();
+			if (m_pMapRead) {
+				m_fileRead.unmap(m_pMapRead);
+				m_pMapRead = nullptr;
+				m_pDataRead = nullptr;
+			}
+			m_fileRead.close();
 		};
 
 	private:
-		void remap(int nIdxStart) {
-			m_nIndexStart = nIdxStart;
-			if (m_pMap) {
-				m_file.unmap(m_pMap);
-				m_pMap = nullptr;
+		void remapWrite(int nIdxStart) {
+			m_nIndexStartWrite = nIdxStart;
+			if (m_pMapWrite) {
+				m_fileWrite.unmap(m_pMapWrite);
+				m_pMapWrite = nullptr;
 			}
-			qulonglong nFileOffset = ((qulonglong)m_nIndexStart) * m_nSizeType + FILEHEAD_LENGTH;
-			if (!m_file.isOpen() && !m_file.open(QIODevice::ReadWrite)) {
-				return;
-			}
-			int nMod = nFileOffset % m_nAllocGran;
-			m_pMap = m_file.map(nFileOffset - nMod, m_nGrow * m_nSizeType + nMod);
-			m_file.close();
-			m_pData = (T*)(m_pMap + nMod);
+			qulonglong nFileOffset = ((qulonglong)m_nIndexStartWrite) * m_nSizeType + FILEHEAD_LENGTH;
+			m_pMapWrite = m_fileWrite.map(nFileOffset, m_nGrow * m_nSizeType);
+			m_pDataWrite = (T*)m_pMapWrite;
 		}
-		void remapReadOnly(int nIdxStart) {
-			m_nIndexStartReadOnly = nIdxStart;
+		void remapRead(int nIdxStart) {
+			m_nIndexStartRead = nIdxStart;
 			qulonglong nFileOffset = ((qulonglong)nIdxStart) * m_nSizeType + FILEHEAD_LENGTH;
-			if (!m_fileReadOnly.isOpen() && !m_fileReadOnly.open(QIODevice::ReadOnly)) {
-				return;
+			if (m_pMapRead) {
+				m_fileRead.unmap(m_pMapRead);
+				m_pMapRead = nullptr;
 			}
-			int nMod = nFileOffset % m_nAllocGran;
-			m_fileReadOnly.unmap(m_pMapReadOnly);
-			m_pMapReadOnly = m_fileReadOnly.map(nFileOffset - nMod, m_nGrow * m_nSizeType + nMod);
-			m_pDataReadOnly = (T*)(m_pMapReadOnly + nMod);
+			m_pMapRead = m_fileRead.map(nFileOffset, m_nGrow * m_nSizeType);
+			m_pDataRead = (T*)m_pMapRead;
 		}
 		void reserve(int nMinSize) {
 			m_nCapacity = nMinSize;
-			if (m_pMap) {
-				m_file.unmap(m_pMap);
-				m_pMap = nullptr;
+			if (m_pMapWrite) {
+				m_fileWrite.unmap(m_pMapWrite);
+				m_pMapWrite = nullptr;
 			}
 			///unsigned long 
-			if (m_file.size() < (m_nCapacity * m_nSizeType + FILEHEAD_LENGTH)) {
-				m_file.resize(m_nCapacity * m_nSizeType + FILEHEAD_LENGTH);
+			if (m_fileWrite.size() < (m_nCapacity * m_nSizeType + FILEHEAD_LENGTH)) {
+				m_fileWrite.resize(m_nCapacity * m_nSizeType + FILEHEAD_LENGTH);
 			}
 		}
 	};
@@ -678,8 +696,7 @@ namespace memoryMappingFileBenchmark {
 			g_double = sqrt(tstruct.mInt);
 		}
 	}
-	void batchReadFunc() {
-		TestStruct* tsarr = new TestStruct[vectorMMF.m_nGrow];
+	void batchReadFuncArr(TestStruct* tsarr) {
 		int nSize = vectorMMF.size();
 		for (int i = 0; i < nSize; ) {
 			int n = vectorMMF.batchGet(i, tsarr);
@@ -689,15 +706,15 @@ namespace memoryMappingFileBenchmark {
 				g_double = sqrt(tsarr[n - 1].mInt);
 			} while (--n);
 		}
-		delete[] tsarr;
 	}
-	void batchReadFunc2() {
-		std::vector<TestStruct> tsVec;
+	void batchReadFuncVec(std::vector<TestStruct>& tsVec) {
+		;
 		int nSize = vectorMMF.size();
 		for (int i = 0; i < nSize; ) {
 			vectorMMF.batchGet(i, tsVec);
 			i += tsVec.size();
 			for (int j = 0; j < tsVec.size(); j++) {
+				tsVec[j].mInt *= 2;
 				g_double = sqrt(tsVec[j].mInt);
 			}
 			tsVec.clear();
@@ -718,16 +735,20 @@ namespace memoryMappingFileBenchmark {
 			std::this_thread::sleep_for(std::chrono::microseconds(g_slround));
 		}
 	}
-	void threadFuncBatchRead() {
+	void threadFuncBatchReadArr() {
+		TestStruct* tsarr = new TestStruct[vectorMMF.m_nGrow];
 		for (int i = 0; i < g_repeatCount / g_slround; i++) {
-			batchReadFunc();
+			batchReadFuncArr(tsarr);
 			std::this_thread::sleep_for(std::chrono::microseconds(g_slround));
 		}
+		delete[] tsarr;
 	}
-	void threadFuncBatchRead2() {
+	void threadFuncBatchReadVec() {
+		std::vector<TestStruct> tsVec;
 		for (int i = 0; i < g_repeatCount / g_slround; i++) {
-			batchReadFunc2();
+			batchReadFuncVec(tsVec);
 			std::this_thread::sleep_for(std::chrono::microseconds(g_slround));
+			tsVec.clear();
 		}
 	}
 	void threadFuncWrite() {
@@ -735,11 +756,15 @@ namespace memoryMappingFileBenchmark {
 			writeFunc();
 		}
 	}
+
+	///测试函数
 	void testRound() {
 		std::cout << "repeat times:" << g_repeatCount << std::endl;
 		std::vector<std::thread> threads;
 
-		///single qt read
+		decltype(std::chrono::high_resolution_clock::now())  startTime, endTime;
+
+		///qfile map api，每次读取一个
 		threads.clear();
 		g_count = 0;
 		vectorMMF.clear();
@@ -747,18 +772,17 @@ namespace memoryMappingFileBenchmark {
 			QFile::remove(file);
 		}
 		vectorMMF.read(file);
-		auto startSingleRead = std::chrono::high_resolution_clock::now();
+		startTime = std::chrono::high_resolution_clock::now();
 		threads.push_back(std::thread(threadFuncWrite));
-		//threads.push_back(std::thread(threadFuncSingleRead));
-		threads.push_back(std::thread(threadFuncSingleReadOnly));
+		threads.push_back(std::thread(threadFuncSingleRead));
 		for (auto& thread : threads)
 			thread.join();
-		auto endSingleRead = std::chrono::high_resolution_clock::now();
-		std::cout << "single read:    " << std::chrono::duration_cast<std::chrono::milliseconds>(endSingleRead - startSingleRead).count() << " ms" << std::endl;
+		endTime = std::chrono::high_resolution_clock::now();
+		std::cout << "single read:    " << std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count() << " ms" << std::endl;
 		vectorMMF.write();
 		std::cout << g_double << " \n\r";
 
-		///single win read
+		///wind memeory api,每次读取一个
 		threads.clear();
 		g_count = 0;
 		winVecMMF.clear();
@@ -766,51 +790,69 @@ namespace memoryMappingFileBenchmark {
 			QFile::remove(file);
 		}
 		winVecMMF.Read(filews);
-		auto startSingleWinRead = std::chrono::high_resolution_clock::now();
+		startTime = std::chrono::high_resolution_clock::now();
 		threads.push_back(std::thread(threadFuncWinWrite));
 		threads.push_back(std::thread(threadFuncSingleWinRead));
 		for (auto& thread : threads)
 			thread.join();
-		auto endSingleWinRead = std::chrono::high_resolution_clock::now();
-		std::cout << "single win read:" << std::chrono::duration_cast<std::chrono::milliseconds>(endSingleWinRead - startSingleWinRead).count() << " ms" << std::endl;
+		endTime = std::chrono::high_resolution_clock::now();
+		std::cout << "single win read:" << std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count() << " ms" << std::endl;
 		winVecMMF.write();
 		std::cout << g_double << " \n\r";
 
-		////////batch qt read
-		//threads.clear();
-		//g_count = 0;
-		//vectorMMF.clear();
-		//if (QFile::exists(file)) {
-		//	QFile::remove(file);
-		//}
-		//vectorMMF.read(file);
-		//auto startBatchRead = std::chrono::high_resolution_clock::now();
-		//threads.push_back(std::thread(threadFuncWrite));
-		//threads.push_back(std::thread(threadFuncBatchRead));
-		//for (auto& thread : threads)
-		//	thread.join();
-		//auto endBatchRead = std::chrono::high_resolution_clock::now();
-		//std::cout << "batch read:     " << std::chrono::duration_cast<std::chrono::milliseconds>(endBatchRead - startBatchRead).count() << " ms" << std::endl;
-		//vectorMMF.write();
-		//std::cout << g_double << " \n\r";
+		///qfile map api，读写分离，二者同时map一个文件（存在脏读情况）
+		threads.clear();
+		g_count = 0;
+		vectorMMF.clear();
+		if (QFile::exists(file)) {
+			QFile::remove(file);
+		}
+		vectorMMF.read(file);
+		startTime = std::chrono::high_resolution_clock::now();
+		threads.push_back(std::thread(threadFuncWrite));
+		threads.push_back(std::thread(threadFuncSingleReadOnly));
+		for (auto& thread : threads)
+			thread.join();
+		endTime = std::chrono::high_resolution_clock::now();
+		std::cout << "s-only read:    " << std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count() << " ms" << std::endl;
+		vectorMMF.write();
+		std::cout << g_double << " \n\r";
 
-		////////batch qt read 2
-		//threads.clear();
-		//g_count = 0;
-		//vectorMMF.clear();
-		//if (QFile::exists(file)) {
-		//	QFile::remove(file);
-		//}
-		//vectorMMF.read(file);
-		//auto startBatchRead2 = std::chrono::high_resolution_clock::now();
-		//threads.push_back(std::thread(threadFuncWrite));
-		//threads.push_back(std::thread(threadFuncBatchRead2));
-		//for (auto& thread : threads)
-		//	thread.join();
-		//auto endBatchRead2 = std::chrono::high_resolution_clock::now();
-		//std::cout << "batch read2:    " << std::chrono::duration_cast<std::chrono::milliseconds>(endBatchRead2 - startBatchRead2).count() << " ms" << std::endl;
-		//vectorMMF.write();
-		//std::cout << g_double << " \n\r";
+		////qfile map api，用数组批量读取
+		threads.clear();
+		g_count = 0;
+		vectorMMF.clear();
+		if (QFile::exists(file)) {
+			QFile::remove(file);
+		}
+		vectorMMF.read(file);
+		startTime = std::chrono::high_resolution_clock::now();
+		threads.push_back(std::thread(threadFuncWrite));
+		threads.push_back(std::thread(threadFuncBatchReadArr));
+		for (auto& thread : threads)
+			thread.join();
+		endTime = std::chrono::high_resolution_clock::now();
+		std::cout << "arr batch read:     " << std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count() << " ms" << std::endl;
+		vectorMMF.write();
+		std::cout << g_double << " \n\r";
+
+		////qfile map api，用vector批量读取
+		threads.clear();
+		g_count = 0;
+		vectorMMF.clear();
+		if (QFile::exists(file)) {
+			QFile::remove(file);
+		}
+		vectorMMF.read(file);
+		startTime = std::chrono::high_resolution_clock::now();
+		threads.push_back(std::thread(threadFuncWrite));
+		threads.push_back(std::thread(threadFuncBatchReadVec));
+		for (auto& thread : threads)
+			thread.join();
+		endTime = std::chrono::high_resolution_clock::now();
+		std::cout << "vec batch read:     " << std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime).count() << " ms" << std::endl;
+		vectorMMF.write();
+		std::cout << g_double << " \n\r";
 	}
 	int runBenchMark() {
 		testRound();
