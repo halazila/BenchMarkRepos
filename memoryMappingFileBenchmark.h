@@ -1,7 +1,6 @@
 #pragma once
 #include <QtCore>
 #include <mutex>
-#include "cleanSeprateReadWriteMMF.h"
 
 #ifndef FILEHEAD_LENGTH
 #define FILEHEAD_LENGTH 100 //file head length
