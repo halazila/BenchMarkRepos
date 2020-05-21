@@ -163,8 +163,38 @@ namespace containerBenchMark {
 		cout << "std::vector insert:        " << double(duration.count()) << " us" << endl;
 	}
 
+	void funcMapCopy() {
+		cout << "******** std::map copy benchmark **********" << endl;
+		///QByteArray is more effective than string, because of copy when write feature
+		std::map<QByteArray, int> stdMap;
+		std::map<QByteArray, int>stdMapCopy1, stdMapCopy2;
+		char charr[100];
+		int mapCount = 1000000;
+		int len;
+		for (int i = 0; i < mapCount; i++) {
+			len = rand() % 100;
+			gen_random(charr, len);
+			stdMap[QByteArray(charr)] = i;
+		}
+		decltype(chrono::steady_clock::now()) startTime, endTime;
+		////iterate copy
+		startTime = chrono::steady_clock::now();
+		for (auto it = stdMap.begin(); it != stdMap.end(); it++) {
+			stdMapCopy1[it->first] = it->second;
+		}
+		endTime = chrono::steady_clock::now();
+		cout << "std::map iterate copy:        " << chrono::duration_cast<chrono::microseconds>(endTime - startTime).count() << " us" << endl;
+
+		////assign copy
+		startTime = chrono::steady_clock::now();
+		stdMapCopy2 = stdMap;
+		endTime = chrono::steady_clock::now();
+		cout << "std::map assign copy:         " << chrono::duration_cast<chrono::microseconds>(endTime - startTime).count() << " us" << endl;
+	}
+
 	int runBenchMark() {
-		funcHashMap();
+		funcMapCopy();
+		//funcHashMap();
 		return 0;
 	}
 
